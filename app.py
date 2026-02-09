@@ -187,6 +187,7 @@ elif st.session_state.step == "review":
         st.session_state.step = "input"
         st.rerun()
 
+<<<<<<< HEAD
 
 # =========================================================
 # --- STEP 3: LOGGING PHASE ---
@@ -222,6 +223,27 @@ elif st.session_state.step == "verified":
 
     st.markdown("---")
 
+=======
+# --- STEP 3: LOGGING PHASE ---
+elif st.session_state.step == "verified":
+    st.header("Step 3: Verification Log")
+    
+    if st.session_state.verification_status == "Verified Accurate":
+        st.success("✅ Success! The agent's claim matched the source evidence.")
+    else:
+        st.error("⚠️ Correction! The human verifier caught a hallucination.")
+        
+    # JSON Log Display (Useful for your paper's data collection)
+    log_data = {
+        "topic": st.session_state.topic,
+        "agent_claim": st.session_state.ai_summary,
+        "source_url": st.session_state.research_data['url'],
+        "human_verdict": st.session_state.verification_status
+    }
+    st.json(log_data)
+    
+    st.markdown("---")
+>>>>>>> 1418033f3b64434b48ba7df83dd164701d094820
     if st.button("🔬 Test Another Topic"):
         st.session_state.step = "input"
         st.rerun()
