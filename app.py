@@ -100,13 +100,15 @@ if st.session_state.step == "input":
                     st.session_state.topic = topic_input
                     st.session_state.research_data = search_result['results'][0]
                     
+                    # UPDATED SYSTEM PROMPT
                     source_text = st.session_state.research_data['content']
                     prompt = f"""
-                    You are a rigorous financial research assistant.
-                    Based ONLY on the following text, extract the key factual claim.
-                    Do not add outside knowledge.
-                    Limit to 2 sentences.
-                    Text:
+                    System Instruction: You are a strict financial verification assistant. You will be provided with a user query and raw source context. You must adhere strictly to the following rules:
+                    1. Base your answer solely on the provided raw context.
+                    2. Do not use any internal knowledge, external facts, or assumptions.
+                    3. Your final response must be exactly two sentences long.
+                    
+                    Text Context:
                     {source_text}
                     """
 
@@ -215,6 +217,7 @@ elif st.session_state.step == "verified":
     st.json(log_data)
     
     st.markdown("---")
+    # FIXED BUTTON AND STATE RESET
     if st.button("🔬 Test Another Topic"):
         st.session_state.step = "input"
         st.rerun()
