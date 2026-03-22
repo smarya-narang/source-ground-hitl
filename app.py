@@ -10,7 +10,6 @@ from tavily import TavilyClient
 # --- PAGE CONFIGURATION (Must be the first Streamlit command) ---
 st.set_page_config(layout="wide", page_title="Agent Verification Lab")
 
-
 # --- SECURITY SETUP ---
 load_dotenv()
 
@@ -26,7 +25,7 @@ llm = ChatGroq(temperature=0, model_name="llama-3.3-70b-versatile", groq_api_key
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # --- CSV LOGGING SETUP ---
-CSV_FILE = "experiment_results2.csv"
+CSV_FILE = "experiment_results3.csv"
 
 if not os.path.exists(CSV_FILE):
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
@@ -37,7 +36,8 @@ if not os.path.exists(CSV_FILE):
             "agent_claim",
             "source_url",
             "human_verdict",
-            "verification_mode"
+            "verification_mode",
+            "verification_time_seconds" # <-- NEW COLUMN FOR THE TIMER
         ])
 
 # --- UI HEADER ---
@@ -53,6 +53,8 @@ if "ai_summary" not in st.session_state: st.session_state.ai_summary = ""
 if "exact_quote" not in st.session_state: st.session_state.exact_quote = ""
 if "verification_status" not in st.session_state: st.session_state.verification_status = None
 if "experiment_mode" not in st.session_state: st.session_state.experiment_mode = "Source-Grounded (Experimental)"
+if "start_time" not in st.session_state: st.session_state.start_time = None # <-- TIMER START STATE
+if "verification_time" not in st.session_state: st.session_state.verification_time = None # <-- TIMER END STATE
 
 # --- STEP 1: INPUT PHASE ---
 if st.session_state.step == "input":
@@ -68,13 +70,11 @@ if st.session_state.step == "input":
     
     # 2. Trap Question Loader (Dropdown)
     trap_questions = []
-    # Note: Make sure you use your latest dataset name here (e.g., dataset_v2.csv or queries.csv)
     dataset_file = "adversarial_dataset2.csv" if os.path.exists("adversarial_dataset2.csv") else "queries.csv"
     
     if os.path.exists(dataset_file):
         with open(dataset_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            # Handle different possible column names for the question
             q_col = "Question" if "Question" in reader.fieldnames else "query"
             trap_questions = [row[q_col] for row in reader if q_col in row]
 
@@ -101,27 +101,26 @@ if st.session_state.step == "input":
 
                     st.session_state.topic = topic_input
                     st.session_state.research_data = search_result['results'][0]
-                    
                     # UPDATED SYSTEM PROMPT
                     source_text = st.session_state.research_data['content']
                     
-                    # --- NEW JSON PROMPT FOR HIGHLIGHTING ---
+                    # Added JSON instructions back in so the highlighter works!
                     prompt = f"""
-                    You are a rigorous financial research assistant.
-                    Based ONLY on the following text, extract the key factual claim.
-                    Do not add outside knowledge. Limit the claim to 1-2 sentences.
+                    System Instruction: You are a strict financial verification assistant. You will be provided with a user query and raw source context. You must adhere strictly to the following rules:
+                    1. Base your answer solely on the provided raw context.
+                    2. Do not use any internal knowledge, external facts, or assumptions.
+                    3. Your final response must be exactly two sentences long.
                     
                     You MUST return your response as a valid JSON object with exactly two keys:
                     "claim": "Your summary here",
                     "exact_quote": "Copy and paste the EXACT word-for-word sentence from the text that proves your claim. If you cannot find one, leave this empty."
 
-                    Text:
+                    Text Context:
                     {source_text}
                     """
 
                     response = llm.invoke(prompt)
                     
-                    # Safely parse the JSON response
                     try:
                         clean_text = response.content.replace('```json', '').replace('```', '').strip()
                         parsed_data = json.loads(clean_text)
@@ -129,10 +128,11 @@ if st.session_state.step == "input":
                         st.session_state.ai_summary = parsed_data.get("claim", "Error extracting claim.")
                         st.session_state.exact_quote = parsed_data.get("exact_quote", "")
                     except json.JSONDecodeError:
-                        # Fallback if the AI fails to write proper JSON
                         st.session_state.ai_summary = response.content
                         st.session_state.exact_quote = ""
 
+                    # --- START TIMER EXACTLY WHEN AGENT FINISHES ---
+                    st.session_state.start_time = datetime.now()
                     st.session_state.step = "review"
                     st.rerun()
 
@@ -148,7 +148,6 @@ elif st.session_state.step == "review":
         
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Safely format AI text to prevent Streamlit from making it a math equation
     safe_summary = st.session_state.ai_summary.replace("$", "\$")
     
     # If Experimental Mode: Show Split Screen
@@ -169,12 +168,11 @@ elif st.session_state.step == "review":
                 content = st.session_state.research_data['content']
                 quote = st.session_state.get('exact_quote', '')
                 
-                # --- NEW HIGHLIGHT LOGIC ---
                 if quote and quote in content:
                     highlight_html = f'<mark style="background-color: #ffeb3b; color: #000; padding: 0 4px; border-radius: 4px; font-weight: bold; box-shadow: 0 0 5px #ffeb3b;">{quote}</mark>'
                     highlighted_content = content.replace(quote, highlight_html)
                 else:
-                    highlighted_content = content # Fallback if quote doesn't match perfectly
+                    highlighted_content = content 
                 
                 st.markdown(
                     f"""
@@ -200,6 +198,13 @@ elif st.session_state.step == "review":
     st.write("### 🔍 Verification Decision")
 
     def log_to_csv(verdict):
+        # --- STOP TIMER AND CALCULATE SECONDS ---
+        if st.session_state.start_time:
+            time_taken = round((datetime.now() - st.session_state.start_time).total_seconds(), 2)
+        else:
+            time_taken = 0.0
+        st.session_state.verification_time = time_taken
+
         with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -208,7 +213,8 @@ elif st.session_state.step == "review":
                 st.session_state.ai_summary,
                 st.session_state.research_data['url'],
                 verdict,
-                st.session_state.experiment_mode
+                st.session_state.experiment_mode,
+                time_taken # <-- RECORD THE TIME TO CSV
             ])
 
     c1, c2, c3 = st.columns(3)
@@ -243,7 +249,8 @@ elif st.session_state.step == "verified":
         "agent_claim": st.session_state.ai_summary,
         "source_url": st.session_state.research_data['url'],
         "human_verdict": st.session_state.verification_status,
-        "mode_used": st.session_state.experiment_mode
+        "mode_used": st.session_state.experiment_mode,
+        "verification_time_seconds": st.session_state.verification_time # <-- SHOW TIME ON SCREEN
     }
     st.json(log_data)
     
